@@ -16,6 +16,7 @@ from selenium import webdriver
 
 
 logger = logging.getLogger('libserpy')
+random.seed()
 
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36"
@@ -39,7 +40,8 @@ def wait_for_results(driver):
 
 
 def random_wait():
-    time.sleep(random.random() * random.random() * 2)
+    i = random.randint(1,2)
+    return i + (random.random() * random.random())
 
 
 @contextmanager
@@ -55,70 +57,79 @@ def driver_ctx(name="chrome", **kwargs):
         driver.quit()
 
 
-def gather_link_info(driver):
-    links = []
-    for result_div in driver.find_elements_by_xpath('//h3[@class=\'r\']'):
-        try:
-            link = result_div.find_element_by_tag_name('a')
-        except:
-            logger.exception("Exception retreiving search result links")
-            continue
-        href_text = link.get_attribute('href')
-        logger.debug("Found link: %s", href_text)
-        links.append((link.text, href_text,))
-    return links
+class SearchRunner(object):
 
+    def __init__(self, phrase, driver_name='phantomjs', driver_kwargs=None):
+        self.phrase = phrase
+        self.driver_name = driver_name
+        self.driver_kwargs = driver_kwargs or {}
 
-def search4(search_phrase):
-    dcap = dict(DesiredCapabilities.PHANTOMJS)
-    # Use Chrome User Agent
-    dcap["phantomjs.page.settings.userAgent"] = USER_AGENT
-    #with driver_ctx() as driver:
-    with driver_ctx('phantomjs', desired_capabilities=dcap, service_args=['--debug=yes']) as driver:
-        driver.get('https://www.google.com')
-        wait_for_results(driver)
-        source = driver.page_source
+    def gather_link_info(self, driver):
         links = []
-        #source = driver.find_element_by_xpath("//*").get_attribute("outerHTML")
-        soup = BeautifulSoup(source, 'html.parser')
-        try:
-            search_input = driver.find_element_by_xpath('//input[@aria-label=\'Search\']')
-        except selenium.common.exceptions.NoSuchElementException as exc:
-            driver.save_screenshot('err.png')
-            raise
-        search_input.send_keys(search_phrase)
-        search_buton = driver.find_element_by_xpath('//input[@aria-label=\'Google Search\']')
-        search_buton.click()
-        wait_for_results(driver)
-        while True:
-            links.extend(gather_link_info(driver))
+        for result_div in driver.find_elements_by_xpath('//h3[@class=\'r\']'):
             try:
-                next_link = driver.find_element_by_xpath('//a[@id=\'pnnext\']')
+                link = result_div.find_element_by_tag_name('a')
+            except:
+                logger.exception("Exception retreiving search result links")
+                continue
+            href_text = link.get_attribute('href')
+            logger.debug("Found link: %s", href_text)
+            yield link.text, href_text
+
+    def search(self):
+        with driver_ctx(self.driver_name, **self.driver_kwargs) as driver:
+            url = 'https://www.google.com'
+            logger.debug("Initial request to %s", url)
+            driver.get(url)
+            wait_for_results(driver)
+            logger.debug("Submit search query")
+            source = driver.page_source
+            soup = BeautifulSoup(source, 'html.parser')
+            try:
+                search_input = driver.find_element_by_xpath('//input[@aria-label=\'Search\']')
             except selenium.common.exceptions.NoSuchElementException as exc:
-                next_link = None
-            if not next_link:
-                break
-            next_link.click()
-            logger.debug('Sleep some...')
-            random_wait()
-        driver.save_screenshot('sucess.png')
-        return links
-
-
-def match_filter(filter, href):
-    return href.find(filter) != -1
+                driver.save_screenshot('err.png')
+                raise
+            search_input.send_keys(self.phrase)
+            search_button = driver.find_element_by_xpath('//input[@aria-label=\'Google Search\']')
+            search_button.click()
+            wait_for_results(driver)
+            while True:
+                logger.debug("Parse results page")
+                for href, txt in self.gather_link_info(driver):
+                    yield txt, href
+                try:
+                    next_link = driver.find_element_by_xpath('//a[@id=\'pnnext\']')
+                except selenium.common.exceptions.NoSuchElementException as exc:
+                    next_link = None
+                if not next_link:
+                    break
+                time.sleep(random_wait())
+                next_link.click()
+                time.sleep(random_wait())
+                logger.debug('Load next page by clicking next')
+            logger.debug('Save screenshot of last page')
+            driver.save_screenshot('sucess.png')
 
 
 def main():
     logging.basicConfig(level=logging.WARN, format='%(asctime)s - %(message)s')
     parser = argparse.ArgumentParser()
     parser.add_argument('query', help='Search query')
-    parser.add_argument('--filter', help='filter')
+    parser.add_argument('--driver', default='phantomjs', help='Web driver to use')
     ns = parser.parse_args()
-    links = search4(ns.query)
-    for n, (test, href,) in enumerate(links):
-        if ns.filter and not match_filter(ns.filter, href):
-            continue
+    dcap = dict(DesiredCapabilities.PHANTOMJS)
+    if ns.driver == 'phantomjs':
+        # Use Chrome User Agent
+        dcap["phantomjs.page.settings.userAgent"] = USER_AGENT
+        kwargs = {
+            'desired_capabilities': dcap,
+            'service_args': ['--debug=yes'],
+        }
+    else:
+        kwargs = {}
+    searcher = SearchRunner(ns.query, driver_name=ns.driver, driver_kwargs=kwargs)
+    for n, (test, href,) in enumerate(searcher.search()):
         print(n, test, href)
 
 
