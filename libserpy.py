@@ -40,8 +40,8 @@ def wait_for_results(driver):
 
 
 def random_wait():
-    i = random.randint(1,2)
-    return i + (random.random() * random.random())
+    i = random.randint(1, 3)
+    return i + (random.random() * random.random() * 2)
 
 
 @contextmanager
@@ -76,7 +76,7 @@ class SearchRunner(object):
             logger.debug("Found link: %s", href_text)
             yield link.text, href_text
 
-    def search(self):
+    def search(self, limit=0):
         with driver_ctx(self.driver_name, **self.driver_kwargs) as driver:
             url = 'https://www.google.com'
             logger.debug("Initial request to %s", url)
@@ -94,14 +94,24 @@ class SearchRunner(object):
             search_button = driver.find_element_by_xpath('//input[@aria-label=\'Google Search\']')
             search_button.click()
             wait_for_results(driver)
+
+            count = 0
+            def should_stop():
+                return limit > 0 and count > limit
+
             while True:
                 logger.debug("Parse results page")
                 for href, txt in self.gather_link_info(driver):
+                    count += 1
                     yield txt, href
+                    if should_stop():
+                        break
                 try:
                     next_link = driver.find_element_by_xpath('//a[@id=\'pnnext\']')
                 except selenium.common.exceptions.NoSuchElementException as exc:
                     next_link = None
+                if should_stop():
+                    break
                 if not next_link:
                     break
                 time.sleep(random_wait())
@@ -116,6 +126,7 @@ def main():
     logging.basicConfig(level=logging.WARN, format='%(asctime)s - %(message)s')
     parser = argparse.ArgumentParser()
     parser.add_argument('query', help='Search query')
+    parser.add_argument('--limit', default=0, type=int, help='Stop after this number of results')
     parser.add_argument('--driver', default='phantomjs', help='Web driver to use')
     ns = parser.parse_args()
     dcap = dict(DesiredCapabilities.PHANTOMJS)
@@ -129,7 +140,7 @@ def main():
     else:
         kwargs = {}
     searcher = SearchRunner(ns.query, driver_name=ns.driver, driver_kwargs=kwargs)
-    for n, (test, href,) in enumerate(searcher.search()):
+    for n, (test, href,) in enumerate(searcher.search(ns.limit)):
         print(n, test, href)
 
 
