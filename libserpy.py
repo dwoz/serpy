@@ -40,7 +40,7 @@ def wait_for_results(driver):
 
 
 def random_wait():
-    i = random.randint(1, 3)
+    i = 0 # random.randint(1, 3)
     return i + (random.random() * random.random() * 2)
 
 
@@ -140,8 +140,8 @@ def main():
     else:
         kwargs = {}
     searcher = SearchRunner(ns.query, driver_name=ns.driver, driver_kwargs=kwargs)
-    for n, (test, href,) in enumerate(searcher.search(ns.limit)):
-        print(n, test, href)
+    for test, href in searcher.search(ns.limit):
+        print(test, href)
 
 
 if __name__ == '__main__':
