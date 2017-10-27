@@ -56,11 +56,64 @@ def driver_ctx(name="chrome", **kwargs):
         driver.service.process.send_signal(signal.SIGKILL)
         driver.quit()
 
+class EngineDriver(object):
+
+    def __init__(self, driver):
+        self.driver = driver
+
+class GoogleEngine(EngineDriver):
+
+    initial_page_url = 'https://www.google.com'
+    def load_search_page(self):
+        logger.debug("Initial request to %s", self.initial_page_url)
+        self.driver.get(self.initial_page_url)
+        wait_for_results(self.driver)
+
+    def enter_search_query(self, query):
+        source = self.driver.page_source
+        soup = BeautifulSoup(source, 'html.parser')
+        try:
+            search_input = self.driver.find_element_by_xpath('//input[@aria-label=\'Search\']')
+        except selenium.common.exceptions.NoSuchElementException as exc:
+            self.driver.save_screenshot('err.png')
+            raise
+        search_input.send_keys(query)
+
+    def submit_search(self):
+        search_button = self.driver.find_element_by_xpath('//input[@aria-label=\'Google Search\']')
+        search_button.click()
+        wait_for_results(self.driver)
+
+    def gather_link_info(self):
+        links = []
+        for result_div in self.driver.find_elements_by_xpath('//h3[@class=\'r\']'):
+            try:
+                link = result_div.find_element_by_tag_name('a')
+            except:
+                logger.exception("Exception retreiving search result links")
+                continue
+            href_text = link.get_attribute('href')
+            logger.debug("Found link: %s", href_text)
+            yield link.text, href_text
+
+    def _get_next_page_link(self):
+        try:
+            return self.driver.find_element_by_xpath('//a[@id=\'pnnext\']')
+        except selenium.common.exceptions.NoSuchElementException as exc:
+            return None
+
+    def has_next_page(self):
+        return self._get_next_page_link() is not None
+
+    def load_next_page(self):
+        self._get_next_page_link().click()
+
 
 class SearchRunner(object):
 
-    def __init__(self, phrase, driver_name='phantomjs', driver_kwargs=None):
+    def __init__(self, phrase, engine, driver_name='phantomjs', driver_kwargs=None):
         self.phrase = phrase
+        self.engine = engine
         self.driver_name = driver_name
         self.driver_kwargs = driver_kwargs or {}
 
@@ -78,22 +131,10 @@ class SearchRunner(object):
 
     def search(self, limit=0):
         with driver_ctx(self.driver_name, **self.driver_kwargs) as driver:
-            url = 'https://www.google.com'
-            logger.debug("Initial request to %s", url)
-            driver.get(url)
-            wait_for_results(driver)
-            logger.debug("Submit search query")
-            source = driver.page_source
-            soup = BeautifulSoup(source, 'html.parser')
-            try:
-                search_input = driver.find_element_by_xpath('//input[@aria-label=\'Search\']')
-            except selenium.common.exceptions.NoSuchElementException as exc:
-                driver.save_screenshot('err.png')
-                raise
-            search_input.send_keys(self.phrase)
-            search_button = driver.find_element_by_xpath('//input[@aria-label=\'Google Search\']')
-            search_button.click()
-            wait_for_results(driver)
+            engine = self.engine(driver)
+            engine.load_search_page()
+            engine.enter_search_query(self.phrase)
+            engine.submit_search()
 
             count = 0
             def should_stop():
@@ -101,21 +142,17 @@ class SearchRunner(object):
 
             while True:
                 logger.debug("Parse results page")
-                for href, txt in self.gather_link_info(driver):
+                for href, txt in engine.gather_link_info():
                     count += 1
                     yield txt, href
                     if should_stop():
                         break
-                try:
-                    next_link = driver.find_element_by_xpath('//a[@id=\'pnnext\']')
-                except selenium.common.exceptions.NoSuchElementException as exc:
-                    next_link = None
                 if should_stop():
                     break
-                if not next_link:
+                if not engine.has_next_page():
                     break
                 time.sleep(random_wait())
-                next_link.click()
+                engine.load_next_page()
                 time.sleep(random_wait())
                 logger.debug('Load next page by clicking next')
             logger.debug('Save screenshot of last page')
@@ -139,7 +176,7 @@ def main():
         }
     else:
         kwargs = {}
-    searcher = SearchRunner(ns.query, driver_name=ns.driver, driver_kwargs=kwargs)
+    searcher = SearchRunner(ns.query, GoogleEngine, driver_name=ns.driver, driver_kwargs=kwargs)
     for test, href in searcher.search(ns.limit):
         print(test, href)
 
