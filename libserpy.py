@@ -109,6 +109,65 @@ class GoogleEngine(EngineDriver):
         self._get_next_page_link().click()
 
 
+class BingEngine(EngineDriver):
+
+    initial_page_url = 'https://www.bing.com'
+
+    def __init__(self, driver):
+        super(BingEngine, self).__init__(driver)
+        self.seenurls = set()
+
+    def load_search_page(self):
+        logger.debug("Initial request to %s", self.initial_page_url)
+        self.driver.get(self.initial_page_url)
+        wait_for_results(self.driver)
+
+    def enter_search_query(self, query):
+        source = self.driver.page_source
+        soup = BeautifulSoup(source, 'html.parser')
+        try:
+            search_input = self.driver.find_element_by_xpath('//input[@name=\'q\']')
+        except selenium.common.exceptions.NoSuchElementException as exc:
+            self.driver.save_screenshot('err.png')
+            raise
+        search_input.send_keys(query)
+
+    def submit_search(self):
+        search_button = self.driver.find_element_by_xpath('//input[@name=\'go\']')
+        search_button.click()
+        wait_for_results(self.driver)
+
+    def gather_link_info(self):
+        links = []
+        logger.debug("Url for search results: %s", self.driver.current_url)
+        for result_div in self.driver.find_elements_by_xpath('//ol[@id=\'b_results\']/li'):
+            try:
+                link = result_div.find_element_by_tag_name('a')
+            except:
+                logger.exception("Exception retreiving search result links")
+                continue
+            href_text = link.get_attribute('href') or ''
+            logger.debug("Found link: %s %s", href_text, link.text)
+            yield link.text, href_text
+
+    def _get_next_page_link(self):
+        try:
+            next_link = driver.find_element_by_xpath('//a[@title=\'Next page\']')
+        except selenium.common.exceptions.NoSuchElementException as exc:
+            next_link = None
+
+    def has_next_page(self):
+        next_url = next_link.get_attribute('href')
+        if next_url in self.seenurls:
+            return False
+        else:
+            self.seenurls.add(next_url)
+            return True
+
+    def load_next_page(self):
+        self._get_next_page_link().click()
+
+
 class SearchRunner(object):
 
     def __init__(self, phrase, engine, driver_name='phantomjs', driver_kwargs=None):
@@ -116,18 +175,6 @@ class SearchRunner(object):
         self.engine = engine
         self.driver_name = driver_name
         self.driver_kwargs = driver_kwargs or {}
-
-    def gather_link_info(self, driver):
-        links = []
-        for result_div in driver.find_elements_by_xpath('//h3[@class=\'r\']'):
-            try:
-                link = result_div.find_element_by_tag_name('a')
-            except:
-                logger.exception("Exception retreiving search result links")
-                continue
-            href_text = link.get_attribute('href')
-            logger.debug("Found link: %s", href_text)
-            yield link.text, href_text
 
     def search(self, limit=0):
         with driver_ctx(self.driver_name, **self.driver_kwargs) as driver:
