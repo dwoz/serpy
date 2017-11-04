@@ -205,6 +205,10 @@ class SearchRunner(object):
             logger.debug('Save screenshot of last page')
             driver.save_screenshot('sucess.png')
 
+engines = {
+    'google': GoogleEngine,
+    'bing': BingEngine,
+}
 
 def main():
     logging.basicConfig(level=logging.WARN, format='%(asctime)s - %(message)s')
@@ -212,6 +216,7 @@ def main():
     parser.add_argument('query', help='Search query')
     parser.add_argument('--limit', default=0, type=int, help='Stop after this number of results')
     parser.add_argument('--driver', default='phantomjs', help='Web driver to use')
+    parser.add_argument('--engine', default='google', help='Search engine to query')
     ns = parser.parse_args()
     dcap = dict(DesiredCapabilities.PHANTOMJS)
     if ns.driver == 'phantomjs':
