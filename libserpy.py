@@ -152,11 +152,15 @@ class BingEngine(EngineDriver):
 
     def _get_next_page_link(self):
         try:
-            next_link = driver.find_element_by_xpath('//a[@title=\'Next page\']')
+            next_link = self.driver.find_element_by_xpath('//a[@title=\'Next page\']')
         except selenium.common.exceptions.NoSuchElementException as exc:
             next_link = None
+        return next_link
 
     def has_next_page(self):
+        next_link = self._get_next_page_link()
+        if not next_link:
+            return False
         next_url = next_link.get_attribute('href')
         if next_url in self.seenurls:
             return False
@@ -228,7 +232,11 @@ def main():
         }
     else:
         kwargs = {}
-    searcher = SearchRunner(ns.query, GoogleEngine, driver_name=ns.driver, driver_kwargs=kwargs)
+    engine = engines.get(ns.engine.lower(), None)
+    if not engine:
+        print('Invalid engine: {}'.format(ns.engine))
+        sys.exit(1)
+    searcher = SearchRunner(ns.query, engine, driver_name=ns.driver, driver_kwargs=kwargs)
     for test, href in searcher.search(ns.limit):
         print(test, href)
 
